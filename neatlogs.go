@@ -48,9 +48,9 @@ import (
 	"github.com/neatlogs/neatlogs-go/internal/attributes"
 )
 
-// defaultEndpoint is the Neatlogs staging ingestion base URL. Override via
+// defaultEndpoint is the Neatlogs ingestion base URL. Override via
 // Config.Endpoint or the NEATLOGS_ENDPOINT environment variable.
-const defaultEndpoint = "https://staging-cloud.neatlogs.com"
+const defaultEndpoint = "https://ingest.neatlogs.com"
 
 // tracerName is the instrumentation scope used by this SDK's own wrappers.
 const tracerName = "neatlogs-go"
