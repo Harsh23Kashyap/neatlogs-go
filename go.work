@@ -1,0 +1,11 @@
+go 1.25.0
+
+// Local development only — never published, so consumers resolve contrib modules
+// from their real tagged versions instead of a replace directive.
+use (
+	.
+	./contrib/adk
+	./contrib/genai
+	./examples/adk
+	./examples/genai
+)

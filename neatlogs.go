@@ -176,7 +176,7 @@ func Init(ctx context.Context, cfg Config, opts ...Option) (ShutdownFunc, error)
 	// finalizes and surfaces the trace. Registered after construction so it can
 	// use the provider's own tracer.
 	if !disable {
-		tp.RegisterSpanProcessor(&completionProcessor{tracer: tp.Tracer(tracerName)})
+		tp.RegisterSpanProcessor(&completionProcessor{tracer: tp.Tracer(tracerName, trace.WithInstrumentationVersion(Version))})
 	}
 	provider = tp
 
@@ -237,6 +237,7 @@ func buildResource(cfg Config) *resource.Resource {
 
 	attrs := []attribute.KeyValue{
 		semconv.ServiceName(workflow),
+		semconv.ServiceVersion(Version),
 		attribute.String(attributes.WorkflowName, workflow),
 	}
 	if len(cfg.Tags) > 0 {
@@ -316,7 +317,7 @@ func tracer() trace.Tracer {
 	tp := provider
 	mu.Unlock()
 	if tp == nil {
-		return noopTP.Tracer(tracerName)
+		return noopTP.Tracer(tracerName, trace.WithInstrumentationVersion(Version))
 	}
-	return tp.Tracer(tracerName)
+	return tp.Tracer(tracerName, trace.WithInstrumentationVersion(Version))
 }

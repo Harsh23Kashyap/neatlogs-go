@@ -16,6 +16,9 @@
 *.test
 coverage.out
 
+# Local workspace checksums (go.work itself IS committed)
+go.work.sum
+
 # Span debug logs
 spans_raw_optimized.log
 spans_optimized.log
