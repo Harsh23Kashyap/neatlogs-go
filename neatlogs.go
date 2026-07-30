@@ -63,7 +63,8 @@ type Config struct {
 	APIKey string
 
 	// Endpoint is the Neatlogs ingestion base URL (without the /v1/traces
-	// path). Falls back to NEATLOGS_ENDPOINT, then the staging default.
+	// path). Falls back to NEATLOGS_ENDPOINT, then defaultEndpoint
+	// (https://ingest.neatlogs.com).
 	Endpoint string
 
 	// WorkflowName labels this service/run. Defaults to the executable name.
