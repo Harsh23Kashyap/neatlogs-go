@@ -67,9 +67,9 @@ const (
 // RAG, agent memory recall) use span kind "retriever"; there is no separate
 // "memory" kind in the canonical mapping.
 const (
-	RetrieverQuery     = "neatlogs.retriever.query"
-	RetrieverTopK      = "neatlogs.retriever.top_k"
-	RetrieverDocuments = "neatlogs.vectordb.retrieval_documents"
+	RetrieverQuery     = "neatlogs.retrieval.query"
+	RetrieverTopK      = "neatlogs.retrieval.top_k"
+	RetrieverDocuments = "neatlogs.retrieval.documents"
 	DocumentsCount     = "neatlogs.db.documents_count"
 )
 

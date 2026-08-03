@@ -192,14 +192,26 @@ func TestStartRetrieverSpan_RecordsRetrieval(t *testing.T) {
 	if v, _ := attrString(span.Attributes, attrs.RetrieverQuery); v != "how do runways work" {
 		t.Errorf("query = %q", v)
 	}
+	if v, _ := attrString(span.Attributes, "neatlogs.retrieval.query"); v != "how do runways work" {
+		t.Errorf("canonical retrieval query = %q", v)
+	}
 	if v, _ := attrInt(span.Attributes, attrs.RetrieverTopK); v != 5 {
 		t.Errorf("top_k = %d, want 5", v)
+	}
+	if v, _ := attrInt(span.Attributes, "neatlogs.retrieval.top_k"); v != 5 {
+		t.Errorf("canonical retrieval top_k = %d, want 5", v)
 	}
 	if v, _ := attrInt(span.Attributes, attrs.DocumentsCount); v != 1 {
 		t.Errorf("doc count = %d, want 1", v)
 	}
 	if v, _ := attrString(span.Attributes, attrs.Output); v != `[{"title":"Runways"}]` {
 		t.Errorf("output = %q", v)
+	}
+	if v, _ := attrString(span.Attributes, "neatlogs.retrieval.documents"); v != `[{"title":"Runways"}]` {
+		t.Errorf("canonical retrieval documents = %q", v)
+	}
+	if _, ok := attrString(span.Attributes, "neatlogs.vectordb.retrieval_documents"); ok {
+		t.Error("legacy vector-db retrieval documents attribute must not be emitted")
 	}
 }
 

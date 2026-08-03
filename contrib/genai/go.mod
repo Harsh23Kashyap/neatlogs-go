@@ -3,7 +3,7 @@ module github.com/neatlogs/neatlogs-go/contrib/genai
 go 1.25.0
 
 require (
-	github.com/neatlogs/neatlogs-go v0.1.3
+	github.com/neatlogs/neatlogs-go v0.1.4
 	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/trace v1.44.0
 	google.golang.org/genai v1.61.0
