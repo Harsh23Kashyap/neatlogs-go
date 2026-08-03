@@ -195,6 +195,9 @@ func TestStartRetrieverSpan_RecordsRetrieval(t *testing.T) {
 	if v, _ := attrString(span.Attributes, "neatlogs.retrieval.query"); v != "how do runways work" {
 		t.Errorf("canonical retrieval query = %q", v)
 	}
+	if v, _ := attrString(span.Attributes, "neatlogs.input.value"); v != "how do runways work" {
+		t.Errorf("generic input = %q", v)
+	}
 	if v, _ := attrInt(span.Attributes, attrs.RetrieverTopK); v != 5 {
 		t.Errorf("top_k = %d, want 5", v)
 	}
@@ -237,5 +240,45 @@ func TestRetrieverSpanSetDocumentsRecordsExplicitEmptyOutput(t *testing.T) {
 	}
 	if v, _ := attrString(span.Attributes, attrs.Output); v != "[]" {
 		t.Errorf("output = %q, want []", v)
+	}
+}
+
+func TestRetrieverSpanSetInputDoesNotCreateQuery(t *testing.T) {
+	ctx := context.Background()
+	sink := tracetest.NewInMemoryExporter()
+	shutdown, err := Init(ctx, Config{WorkflowName: "test"}, WithExporter(sink))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = shutdown(context.Background()) })
+
+	_, r := StartRetrieverSpan(ctx, "hindsight.retain", "", 0)
+	r.SetInput(`{"items":[]}`)
+	r.SetDocuments([]any{}, 0)
+	r.End()
+	if err := Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	var span tracetest.SpanStub
+	found := false
+	for _, candidate := range sink.GetSpans() {
+		if candidate.Name == "hindsight.retain" {
+			span = candidate
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("hindsight.retain span was not exported")
+	}
+	if v, _ := attrString(span.Attributes, attrs.Input); v != `{"items":[]}` {
+		t.Errorf("input = %q", v)
+	}
+	if _, ok := attrString(span.Attributes, attrs.RetrieverQuery); ok {
+		t.Error("write input must not be emitted as a retrieval query")
+	}
+	if v, _ := attrString(span.Attributes, attrs.RetrieverDocuments); v != "[]" {
+		t.Errorf("documents = %q, want []", v)
 	}
 }

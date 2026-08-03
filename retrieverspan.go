@@ -34,12 +34,24 @@ func StartRetrieverSpan(ctx context.Context, name, query string, topK int) (cont
 	ctx, span, end := StartProviderSpan(ctx, name, attrs.KindRetriever)
 	span.SetAttributes(attribute.String(attrs.SpanKind, attrs.KindRetriever))
 	if query != "" {
-		span.SetAttributes(attribute.String(attrs.RetrieverQuery, query))
+		span.SetAttributes(
+			attribute.String(attrs.RetrieverQuery, query),
+			attribute.String(attrs.Input, query),
+		)
 	}
 	if topK != 0 {
 		span.SetAttributes(attribute.Int(attrs.RetrieverTopK, topK))
 	}
 	return ctx, &RetrieverSpan{span: span, end: end}
+}
+
+// SetInput records operation input without pretending it is a retrieval query.
+// Use this for retrieval-shaped writes such as semantic-memory retention.
+func (r *RetrieverSpan) SetInput(input string) {
+	if r == nil || input == "" {
+		return
+	}
+	r.span.SetAttributes(attribute.String(attrs.Input, input))
 }
 
 // SetDocuments records the retrieved documents (JSON-encoded) and their count.
