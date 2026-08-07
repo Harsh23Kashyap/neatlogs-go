@@ -3,6 +3,7 @@ package neatlogs
 import (
 	"context"
 	"encoding/json"
+	"strings"
 )
 
 // Request-scoped session & end-user identity.
@@ -32,6 +33,9 @@ type contextKey int
 
 const (
 	sessionIDKey contextKey = iota
+	parentSessionIDKey
+	sessionFeatureNameKey
+	sessionEntryPointKey
 	endUserIDKey
 	endUserMetadataKey
 )
@@ -39,9 +43,12 @@ const (
 // IdentifyOptions carries the request-scoped identity for Identify. All fields
 // are optional; only set ones are bound onto the context.
 type IdentifyOptions struct {
-	SessionID       string
-	EndUserID       string
-	EndUserMetadata map[string]any
+	SessionID          string
+	ParentSessionID    string
+	SessionFeatureName string
+	SessionEntryPoint  string
+	EndUserID          string
+	EndUserMetadata    map[string]any
 }
 
 // Identify returns a copy of ctx carrying the given session + end-user identity.
@@ -53,6 +60,18 @@ func Identify(ctx context.Context, opts IdentifyOptions) context.Context {
 	if opts.SessionID != "" {
 		ctx = context.WithValue(ctx, sessionIDKey, opts.SessionID)
 	}
+	if parentID := strings.TrimSpace(opts.ParentSessionID); parentID != "" {
+		sessionID, _ := ctx.Value(sessionIDKey).(string)
+		if parentID != strings.TrimSpace(sessionID) {
+			ctx = context.WithValue(ctx, parentSessionIDKey, parentID)
+		}
+	}
+	if featureName := strings.TrimSpace(opts.SessionFeatureName); featureName != "" {
+		ctx = context.WithValue(ctx, sessionFeatureNameKey, featureName)
+	}
+	if entryPoint := strings.TrimSpace(opts.SessionEntryPoint); entryPoint != "" {
+		ctx = context.WithValue(ctx, sessionEntryPointKey, entryPoint)
+	}
 	if opts.EndUserID != "" {
 		ctx = context.WithValue(ctx, endUserIDKey, opts.EndUserID)
 	}
@@ -62,12 +81,25 @@ func Identify(ctx context.Context, opts IdentifyOptions) context.Context {
 	return ctx
 }
 
-// sessionIDFromContext returns the session id bound to ctx, or "" if none.
-func sessionIDFromContext(ctx context.Context) string {
-	if v, ok := ctx.Value(sessionIDKey).(string); ok {
-		return v
+// sessionIdentityFromContext returns the session identity and optional
+// hierarchy/discovery metadata bound to ctx. Invalid optional metadata is
+// ignored so identity enrichment can never prevent a span from starting.
+func sessionIdentityFromContext(ctx context.Context) (
+	sessionID string,
+	parentSessionID string,
+	featureName string,
+	entryPoint string,
+) {
+	sessionID, _ = ctx.Value(sessionIDKey).(string)
+	parentSessionID, _ = ctx.Value(parentSessionIDKey).(string)
+	featureName, _ = ctx.Value(sessionFeatureNameKey).(string)
+	entryPoint, _ = ctx.Value(sessionEntryPointKey).(string)
+
+	parentSessionID = strings.TrimSpace(parentSessionID)
+	if parentSessionID == strings.TrimSpace(sessionID) {
+		parentSessionID = ""
 	}
-	return ""
+	return sessionID, parentSessionID, strings.TrimSpace(featureName), strings.TrimSpace(entryPoint)
 }
 
 // endUserFromContext returns the end-user id and metadata bound to ctx. Either

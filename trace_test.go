@@ -63,6 +63,84 @@ func TestTrace_StampsIdentityOnRoot(t *testing.T) {
 	}
 }
 
+func TestTrace_StampsAdditiveSessionMetadata(t *testing.T) {
+	ctx := context.Background()
+	sink := tracetest.NewInMemoryExporter()
+	sd, err := Init(ctx, Config{WorkflowName: "wf"}, WithExporter(sink))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sd(ctx)
+
+	ctx = Identify(ctx, IdentifyOptions{
+		SessionID:          "conversation_123",
+		ParentSessionID:    "  project_456  ",
+		SessionFeatureName: "  theme studio  ",
+		SessionEntryPoint:  "  slack  ",
+	})
+	_, _, end := Trace(ctx, "chat_turn")
+	end()
+	Flush(ctx)
+
+	root := byName(sink, "chat_turn")
+	if v, _ := attrString(root.Attributes, attrs.SessionID); v != "conversation_123" {
+		t.Errorf("session.id = %q, want conversation_123", v)
+	}
+	if v, _ := attrString(root.Attributes, attrs.SessionParentID); v != "project_456" {
+		t.Errorf("session.parent_id = %q, want project_456", v)
+	}
+	if v, _ := attrString(root.Attributes, attrs.SessionFeatureName); v != "theme studio" {
+		t.Errorf("session.feature.name = %q, want theme studio", v)
+	}
+	if v, _ := attrString(root.Attributes, attrs.SessionEntryPoint); v != "slack" {
+		t.Errorf("session.entry_point = %q, want slack", v)
+	}
+
+	marker := byName(sink, completionMarkerName)
+	for _, key := range []string{
+		attrs.SessionID,
+		attrs.SessionParentID,
+		attrs.SessionFeatureName,
+		attrs.SessionEntryPoint,
+	} {
+		rootValue, rootOK := attrString(root.Attributes, key)
+		markerValue, markerOK := attrString(marker.Attributes, key)
+		if !rootOK || !markerOK || markerValue != rootValue {
+			t.Errorf("completion marker %s = %q (present %v), want root value %q", key, markerValue, markerOK, rootValue)
+		}
+	}
+}
+
+func TestTrace_IgnoresEmptyAndSelfParentSessionMetadata(t *testing.T) {
+	ctx := context.Background()
+	sink := tracetest.NewInMemoryExporter()
+	sd, err := Init(ctx, Config{WorkflowName: "wf"}, WithExporter(sink))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sd(ctx)
+
+	ctx = Identify(ctx, IdentifyOptions{
+		SessionID:          "conversation_123",
+		ParentSessionID:    "  conversation_123  ",
+		SessionFeatureName: "  ",
+		SessionEntryPoint:  "\t",
+	})
+	_, _, end := Trace(ctx, "chat_turn")
+	end()
+	Flush(ctx)
+
+	root := byName(sink, "chat_turn")
+	if v, _ := attrString(root.Attributes, attrs.SessionID); v != "conversation_123" {
+		t.Errorf("session.id = %q, want conversation_123", v)
+	}
+	for _, key := range []string{attrs.SessionParentID, attrs.SessionFeatureName, attrs.SessionEntryPoint} {
+		if _, ok := attrString(root.Attributes, key); ok {
+			t.Errorf("%s must be absent", key)
+		}
+	}
+}
+
 // Calling Identify again overrides individual fields without clearing the others.
 func TestIdentify_OverridesPerField(t *testing.T) {
 	ctx := context.Background()

@@ -77,11 +77,14 @@ const (
 // KindRetriever is the span-kind value for retrieval / semantic-memory spans.
 const KindRetriever = "retriever"
 
-// Identity / session resource attributes set by Init.
+// Workflow and session attributes.
 const (
-	WorkflowName = "neatlogs.workflow_name"
-	SessionID    = "neatlogs.session.id"
-	Tags         = "neatlogs.tags"
+	WorkflowName       = "neatlogs.workflow_name"
+	SessionID          = "neatlogs.session.id"
+	SessionParentID    = "neatlogs.session.parent_id"
+	SessionFeatureName = "neatlogs.session.feature.name"
+	SessionEntryPoint  = "neatlogs.session.entry_point"
+	Tags               = "neatlogs.tags"
 )
 
 // End-user identity. The end user is the user of the CUSTOMER'S application,
