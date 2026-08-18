@@ -78,6 +78,12 @@ type Config struct {
 
 	// DisableExport drops all spans instead of sending them. Useful in tests.
 	DisableExport bool
+
+	// DisableSignalHandlers prevents the SDK from wrapping SIGINT and SIGTERM.
+	// By default those signals end active spans, flush the provider, and are
+	// then re-delivered so the process retains its normal exit semantics. Set
+	// this when the host application owns signal handling and calls shutdown.
+	DisableSignalHandlers bool
 }
 
 // ShutdownFunc flushes pending spans and releases SDK resources. Call it (often
@@ -169,6 +175,10 @@ func Init(ctx context.Context, cfg Config, opts ...Option) (ShutdownFunc, error)
 	}
 
 	tp := sdktrace.NewTracerProvider(tpOpts...)
+	// Track every span on the SDK-owned private provider so graceful shutdown
+	// can close incomplete traces child-first before the exporter is drained.
+	lifecycle := newActiveSpanRegistry()
+	tp.RegisterSpanProcessor(lifecycle)
 	// Stamp session/end-user identity (bound via Identify) onto every root span
 	// at start — including spans the SDK doesn't create itself (e.g. ADK
 	// passthrough), which Trace()/the auto-root never see.
@@ -181,20 +191,72 @@ func Init(ctx context.Context, cfg Config, opts ...Option) (ShutdownFunc, error)
 	}
 	provider = tp
 
+	var shutdownState struct {
+		sync.Mutex
+		started bool
+		done    chan struct{}
+		err     error
+	}
+	shutdownState.done = make(chan struct{})
+	var signalController *shutdownSignalController
+
+	shutdownWithReason := func(ctx context.Context, reason string) error {
+		shutdownState.Lock()
+		if shutdownState.started {
+			done := shutdownState.done
+			shutdownState.Unlock()
+			select {
+			case <-done:
+				shutdownState.Lock()
+				err := shutdownState.err
+				shutdownState.Unlock()
+				return err
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		shutdownState.started = true
+		shutdownState.Unlock()
+
+		if signalController != nil {
+			signalController.Stop()
+		}
+
+		// Stop new SDK spans before claiming and ending the live registry.
+		mu.Lock()
+		if provider == tp {
+			provider = nil
+		}
+		mu.Unlock()
+
+		lifecycle.endActiveSpans(reason)
+		err := tp.Shutdown(ctx)
+
+		shutdownState.Lock()
+		shutdownState.err = err
+		close(shutdownState.done)
+		shutdownState.Unlock()
+		return err
+	}
+
+	shutdown := func(ctx context.Context) error {
+		return shutdownWithReason(ctx, "shutdown")
+	}
+
+	if !cfg.DisableSignalHandlers {
+		signalController = newShutdownSignalController()
+		signalController.Start(func(sig os.Signal) {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), gracefulSignalTimeout)
+			defer cancel()
+			_ = shutdownWithReason(shutdownCtx, signalTerminationReason(sig))
+		})
+	}
+
 	if cfg.Debug {
 		fmt.Fprintf(os.Stderr, "neatlogs: initialized (workflow=%q, endpoint=%s, export=%v)\n", resolvedWorkflowNameFrom(cfg), base.String(), !disable)
 	}
 
-	return func(ctx context.Context) error {
-		mu.Lock()
-		if provider != tp {
-			mu.Unlock()
-			return nil
-		}
-		provider = nil
-		mu.Unlock()
-		return tp.Shutdown(ctx)
-	}, nil
+	return shutdown, nil
 }
 
 // Flush forces a synchronous export of all buffered spans. Safe to call even
