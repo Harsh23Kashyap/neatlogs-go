@@ -10,9 +10,10 @@ import (
 
 const gracefulSignalTimeout = 30 * time.Second
 
-// shutdownSignalController temporarily intercepts process termination so the
-// SDK can flush, then restores and re-delivers the signal. Stop is idempotent
-// and safe from the signal goroutine or a normal application shutdown.
+// shutdownSignalController is installed only when Config.EnableSignalHandlers
+// is true. It flushes and then exits with the conventional signal status. It
+// does not re-deliver the signal: a host signal.Notify channel already receives
+// the original delivery, and re-delivery would notify that host twice.
 type shutdownSignalController struct {
 	signals  chan os.Signal
 	done     chan struct{}
@@ -28,17 +29,17 @@ func newShutdownSignalController() *shutdownSignalController {
 
 func (c *shutdownSignalController) Start(shutdown func(os.Signal)) {
 	signal.Notify(c.signals, os.Interrupt, syscall.SIGTERM)
-	go c.run(shutdown, redeliverCurrentProcessSignal)
+	go c.run(shutdown, exitAfterSignal)
 }
 
-func (c *shutdownSignalController) run(shutdown func(os.Signal), redeliver func(os.Signal)) {
+func (c *shutdownSignalController) run(shutdown func(os.Signal), terminate func(os.Signal)) {
 	select {
 	case sig := <-c.signals:
-		// Restore the default before flushing so a second signal can still force
-		// termination, and so re-delivery below retains normal exit semantics.
+		// Stop our registration before flushing. Host-owned signal channels keep
+		// their own registration and receive the original signal exactly once.
 		c.Stop()
 		shutdown(sig)
-		redeliver(sig)
+		terminate(sig)
 	case <-c.done:
 	}
 }
@@ -61,18 +62,17 @@ func signalTerminationReason(sig os.Signal) string {
 	}
 }
 
-func redeliverCurrentProcessSignal(sig os.Signal) {
-	process, err := os.FindProcess(os.Getpid())
-	if err == nil {
-		err = process.Signal(sig)
-	}
-	if err != nil {
-		code := 1
-		if sig == os.Interrupt {
-			code = 130
-		} else if sig == syscall.SIGTERM {
-			code = 143
-		}
-		os.Exit(code)
+func exitAfterSignal(sig os.Signal) {
+	os.Exit(signalExitCode(sig))
+}
+
+func signalExitCode(sig os.Signal) int {
+	switch sig {
+	case os.Interrupt:
+		return 130
+	case syscall.SIGTERM:
+		return 143
+	default:
+		return 1
 	}
 }

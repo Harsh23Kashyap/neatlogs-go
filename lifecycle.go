@@ -3,9 +3,12 @@ package neatlogs
 import (
 	"context"
 	"sort"
+	"strings"
 	"sync"
+	"unicode"
 
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -13,6 +16,8 @@ import (
 const (
 	interruptedAttribute       = "neatlogs.trace.interrupted"
 	terminationReasonAttribute = "neatlogs.trace.termination.reason"
+	interruptionEventName      = "neatlogs.trace.interrupted"
+	maxTerminationReasonRunes  = 256
 )
 
 // activeSpanRegistry owns the live spans created on Neatlogs' private tracer
@@ -47,7 +52,8 @@ func (p *activeSpanRegistry) ForceFlush(context.Context) error { return nil }
 // endActiveSpans atomically claims the current registry and ends it child-first.
 // Claiming before calling End makes repeated and concurrent shutdown calls
 // idempotent. A normal application End that wins the race is skipped through
-// IsRecording. Existing span status is deliberately left untouched.
+// IsRecording. An interrupted span with UNSET status becomes ERROR; explicit
+// OK and existing ERROR statuses are preserved.
 func (p *activeSpanRegistry) endActiveSpans(reason string) int {
 	p.mu.Lock()
 	active := p.spans
@@ -66,7 +72,7 @@ func (p *activeSpanRegistry) endActiveSpans(reason string) int {
 		return activeSpanDepth(spans[i], active) > activeSpanDepth(spans[j], active)
 	})
 
-	cleanReason := truncateRunes(reason, 256)
+	cleanReason := sanitizeTerminationReason(reason)
 	if cleanReason == "" {
 		cleanReason = "shutdown"
 	}
@@ -79,6 +85,12 @@ func (p *activeSpanRegistry) endActiveSpans(reason string) int {
 			attribute.Bool(interruptedAttribute, true),
 			attribute.String(terminationReasonAttribute, cleanReason),
 		)
+		span.AddEvent(interruptionEventName, trace.WithAttributes(
+			attribute.String(terminationReasonAttribute, cleanReason),
+		))
+		if span.Status().Code == codes.Unset {
+			span.SetStatus(codes.Error, cleanReason)
+		}
 		span.End()
 		ended++
 	}
@@ -111,4 +123,14 @@ func truncateRunes(value string, limit int) string {
 		return value
 	}
 	return string(runes[:limit])
+}
+
+func sanitizeTerminationReason(value string) string {
+	printable := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, value)
+	return truncateRunes(strings.Join(strings.Fields(printable), " "), maxTerminationReasonRunes)
 }
