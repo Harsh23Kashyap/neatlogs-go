@@ -16,6 +16,9 @@ const (
 	Input    = "neatlogs.input.value"
 	Internal = "neatlogs.internal" // bool: framework-internal span, not user-facing
 	Output   = "neatlogs.output.value"
+	// TraceOutput is an application-declared final result on a WORKFLOW root.
+	// The backend prefers it over child-derived output when both are present.
+	TraceOutput = "neatlogs.trace.output"
 )
 
 // GenAIOperationName is the OpenTelemetry GenAI semantic-convention attribute
