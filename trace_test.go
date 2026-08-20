@@ -140,6 +140,30 @@ func TestSetTraceOutput_RejectsUnencodableValue(t *testing.T) {
 	}
 }
 
+func TestSetTraceInput_RecordsStructuredRootInput(t *testing.T) {
+	ctx := context.Background()
+	exporter := tracetest.NewInMemoryExporter()
+	shutdown, err := Init(ctx, Config{WorkflowName: "root-input"}, WithExporter(exporter))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shutdown(ctx)
+
+	_, root, end := Trace(ctx, "workflow")
+	if err := SetTraceInput(root, map[string]any{"question": "weather", "turn": 2}); err != nil {
+		t.Fatal(err)
+	}
+	end()
+	if err := Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	span := byName(exporter, "workflow")
+	if got, ok := attrString(span.Attributes, attrs.Input); !ok || got != `{"question":"weather","turn":2}` {
+		t.Fatalf("trace input = %q (present %v), want canonical JSON", got, ok)
+	}
+}
+
 func TestTrace_StampsAdditiveSessionMetadata(t *testing.T) {
 	ctx := context.Background()
 	sink := tracetest.NewInMemoryExporter()

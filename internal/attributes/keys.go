@@ -50,6 +50,14 @@ const (
 
 	LLMFinishReason = "neatlogs.llm.finish_reason"
 	LLMResponseID   = "neatlogs.llm.response_id"
+	LLMChoicePrefix = "neatlogs.llm.choices."
+
+	StreamChunkEvent    = "neatlogs.stream.chunk"
+	StreamChunkIndex    = "neatlogs.stream.chunk.index"
+	StreamChunkValue    = "neatlogs.stream.chunk.value"
+	StreamChunkMIMEType = "neatlogs.stream.chunk.mime_type"
+	StreamChunkCount    = "neatlogs.stream.chunk_count"
+	StreamCancelled     = "neatlogs.stream.cancelled"
 )
 
 // Embedding attributes emitted by the genai wrapper.

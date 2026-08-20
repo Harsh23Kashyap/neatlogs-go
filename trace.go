@@ -56,6 +56,21 @@ func SetTraceOutput(span trace.Span, value any) error {
 	return nil
 }
 
+// SetTraceInput records the application-declared input on a WORKFLOW root.
+// It uses the canonical neatlogs.input.value key consumed by every ingest path.
+// Call it before ending the span returned by Trace.
+func SetTraceInput(span trace.Span, value any) error {
+	if span == nil {
+		return fmt.Errorf("neatlogs: trace span is nil")
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("neatlogs: encode trace input: %w", err)
+	}
+	span.SetAttributes(attribute.String(attrs.Input, string(encoded)))
+	return nil
+}
+
 // StartSpan starts an explicitly typed Neatlogs span on the Client bound to ctx,
 // or on the process-wide Init provider when no Client is bound.
 // Use it at framework and service boundaries where Trace's WORKFLOW kind is not

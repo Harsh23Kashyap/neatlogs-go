@@ -85,6 +85,10 @@ type Config struct {
 	// DisableExport drops all spans instead of sending them. Useful in tests.
 	DisableExport bool
 
+	// Mask transforms a cloned, normalized span on the batch-export worker.
+	// Errors and nil results fail closed: the original span is never exported.
+	Mask MaskFunc
+
 	// EnableSignalHandlers opts Init into handling SIGINT and SIGTERM. The zero
 	// value is false: by default Neatlogs never calls signal.Notify and the host
 	// retains complete signal ownership. Clients never install signal handlers.
@@ -325,7 +329,9 @@ func buildSDKRuntime(ctx context.Context, cfg Config, io initOptions) (*sdkRunti
 		// The batch processor is installed during provider construction. The
 		// completion processor is registered below, after this exporter/root
 		// path, so an ending root is queued before its completion marker.
-		tpOpts = append(tpOpts, sdktrace.WithBatcher(&normalizingExporter{next: exp, mapper: attributes.Default()}))
+		tpOpts = append(tpOpts, sdktrace.WithBatcher(&normalizingExporter{
+			next: exp, mapper: attributes.Default(), mask: cfg.Mask,
+		}))
 	}
 
 	tp := sdktrace.NewTracerProvider(tpOpts...)
