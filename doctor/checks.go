@@ -130,9 +130,11 @@ func missingIOFindings(spans []Span, traceID, runID string) []DoctorFinding {
 			Title:      strings.ToUpper(kind) + " spans are missing input or output",
 			Evidence:   Truncate(intToString(int64(len(names)))+" span(s): "+shown+suffix, 400),
 			Suggestion: "Check that the SDK call completed, capture_input/capture_output is enabled, and the provider integration supports this operation.",
-			TraceID:    traceID,
-			RunID:      runID,
-			FixClass:   "capture",
+			TraceID:      traceID,
+			RunID:        runID,
+			FixClass:     "capture",
+			DocURL:       "https://docs.neatlogs.com/troubleshooting/missing-io",
+			RelatedCodes: []string{"instrumentation-missing"},
 		})
 	}
 	return findings
