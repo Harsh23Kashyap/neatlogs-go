@@ -80,6 +80,38 @@ var InitMarkerKeys = []string{
 // Used by the attribute-completeness check.
 var RequiredSpanAttributes = []string{"neatlogs.span.kind"}
 
+// ---------------------------------------------------------------------------
+// PR #21: OTel GenAI semantic-convention attribute keys.
+// Reference: https://github.com/open-telemetry/semantic-conventions/blob/main/docs/gen-ai/gen-ai-spans.md
+// ---------------------------------------------------------------------------
+
+const (
+	OTelGenAIOperationName        = "gen_ai.operation.name"
+	OTelGenAIProviderName         = "gen_ai.provider.name"
+	OTelGenAIRequestModel         = "gen_ai.request.model"
+	OTelGenAIUsageInputTokens     = "gen_ai.usage.input_tokens"
+	OTelGenAIUsageOutputTokens    = "gen_ai.usage.output_tokens"
+	OTelGenAIResponseFinishReasons = "gen_ai.response.finish_reasons"
+)
+
+// OTelGenaiLLMOperations are the OTel GenAI operation-name values that
+// correspond to an "llm" kind span (per the semconv, these are the
+// chat-style operations).
+var OTelGenaiLLMOperations = map[string]struct{}{
+	"chat":            {},
+	"text_completion": {},
+	"generate_content": {},
+}
+
+// OversizedPromptCharThreshold is the char count above which an LLM
+// span's prompt fires the `oversized-prompt` finding (PR #21).
+const OversizedPromptCharThreshold = 50_000
+
+// RepeatedSystemPromptThreshold is the number of times the same system
+// prompt must repeat before the `repeated-system-prompt` finding fires
+// (PR #21, PII-gated via ReadPromptContent).
+const RepeatedSystemPromptThreshold = 10
+
 // DoctorFinding is a single diagnostic finding emitted by the doctor.
 //
 // The optional FixClass, AutomatedFixAvailable, DocURL, and RelatedCodes
@@ -178,4 +210,9 @@ type Options struct {
 	RunID string
 	// ForeignOnly, if true, only returns foreign-instrumentation findings.
 	ForeignOnly bool
+	// ReadPromptContent, if true, reads LLM prompt contents to detect the
+	// `repeated-system-prompt` pattern (PR #21). Default false. PII
+	// concern: the prompt may contain user data. The other token-waste
+	// checks (oversized-prompt, unused-tool-definition) run regardless.
+	ReadPromptContent bool
 }

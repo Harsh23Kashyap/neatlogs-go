@@ -705,3 +705,226 @@ func itoa(n int) string {
 	}
 	return string(buf[i:])
 }
+
+// ---------------------------------------------------------------------------
+// PR #21: OTel GenAI semconv validation
+// ---------------------------------------------------------------------------
+
+func TestOtelGenaiMissing_Fires(t *testing.T) {
+	// LLM span without gen_ai.operation.name → otel-genai-missing fires.
+	spans := []Span{
+		makeSpan("t1", "r", "", "root", "workflow", map[string]any{
+			"neatlogs.span.kind": "workflow",
+		}),
+		makeSpan("t1", "l", "r", "chat", "llm", map[string]any{
+			"neatlogs.span.kind": "llm",
+		}),
+	}
+	report := runDiagnose(t, spans...)
+	f := findFinding(t, report, "otel-genai-missing")
+	if f.Severity != "warning" {
+		t.Errorf("otel-genai-missing: expected severity warning, got %q", f.Severity)
+	}
+	if f.FixClass != "config" {
+		t.Errorf("otel-genai-missing: expected fix_class config, got %q", f.FixClass)
+	}
+}
+
+func TestOtelGenaiMissing_DoesNotFireWhenPresent(t *testing.T) {
+	spans := []Span{
+		makeSpan("t1", "l", "", "chat", "llm", map[string]any{
+			"neatlogs.span.kind":     "llm",
+			"gen_ai.operation.name": "chat",
+		}),
+	}
+	report := runDiagnose(t, spans...)
+	expectNoCode(t, report, "otel-genai-missing")
+}
+
+func TestOtelGenaiMissing_DoesNotFireOnNonLLM(t *testing.T) {
+	// Tool span without gen_ai attr — not LLM-kind, so no finding.
+	spans := []Span{
+		makeSpan("t1", "t", "", "tool", "tool", map[string]any{
+			"neatlogs.span.kind": "tool",
+		}),
+	}
+	report := runDiagnose(t, spans...)
+	expectNoCode(t, report, "otel-genai-missing")
+}
+
+func TestOtelGenaiInconsistent_Fires(t *testing.T) {
+	// neatlogs=llm but OTel op-name=embeddings → inconsistent.
+	spans := []Span{
+		makeSpan("t1", "l", "", "mismatch", "llm", map[string]any{
+			"neatlogs.span.kind":     "llm",
+			"gen_ai.operation.name": "embeddings",
+		}),
+	}
+	report := runDiagnose(t, spans...)
+	f := findFinding(t, report, "otel-genai-inconsistent")
+	if f.Severity != "info" {
+		t.Errorf("otel-genai-inconsistent: expected severity info, got %q", f.Severity)
+	}
+	if !strings.Contains(f.Evidence, "neatlogs.span.kind='llm'") {
+		t.Errorf("otel-genai-inconsistent: evidence should mention kind='llm', got: %s", f.Evidence)
+	}
+	if !strings.Contains(f.Evidence, "gen_ai.operation.name='embeddings'") {
+		t.Errorf("otel-genai-inconsistent: evidence should mention op-name, got: %s", f.Evidence)
+	}
+}
+
+// §12.8.2 (PR #21 review): the walker must check isLLMKind() BEFORE
+// looking at op-name. A tool span with chat op-name is still a tool span.
+func TestOtelGenaiInconsistent_DoesNotFireOnToolSpan(t *testing.T) {
+	spans := []Span{
+		makeSpan("t1", "t", "", "my-tool", "tool", map[string]any{
+			"neatlogs.span.kind":     "tool",
+			"gen_ai.operation.name": "chat",
+		}),
+	}
+	report := runDiagnose(t, spans...)
+	expectNoCode(t, report, "otel-genai-inconsistent")
+}
+
+// ---------------------------------------------------------------------------
+// PR #21: token-waste findings
+// ---------------------------------------------------------------------------
+
+func TestOversizedPrompt_Fires(t *testing.T) {
+	big := strings.Repeat("x", OversizedPromptCharThreshold+1)
+	spans := []Span{
+		makeSpan("t1", "l", "", "huge", "llm", map[string]any{
+			"neatlogs.span.kind":   "llm",
+			"neatlogs.llm.system": big,
+		}),
+	}
+	report := runDiagnose(t, spans...)
+	f := findFinding(t, report, "oversized-prompt")
+	if f.Severity != "warning" {
+		t.Errorf("oversized-prompt: expected severity warning, got %q", f.Severity)
+	}
+}
+
+func TestOversizedPrompt_DoesNotFireOnSmall(t *testing.T) {
+	spans := []Span{
+		makeSpan("t1", "l", "", "small", "llm", map[string]any{
+			"neatlogs.span.kind":   "llm",
+			"neatlogs.llm.system": "You are a helpful assistant.",
+		}),
+	}
+	report := runDiagnose(t, spans...)
+	expectNoCode(t, report, "oversized-prompt")
+}
+
+func TestRepeatedSystemPrompt_PIIGated_DefaultOff(t *testing.T) {
+	sys := "You are a helpful assistant."
+	spans := make([]Span, 0, 15)
+	for i := 0; i < 15; i++ {
+		spans = append(spans, makeSpan("t1", "s"+intToString(int64(i)), "", "call", "llm", map[string]any{
+			"neatlogs.span.kind":   "llm",
+			"neatlogs.llm.system": sys,
+		}))
+	}
+	// Default Options: ReadPromptContent=false → no finding.
+	report := runDiagnose(t, spans...)
+	expectNoCode(t, report, "repeated-system-prompt")
+}
+
+func TestRepeatedSystemPrompt_FiresWithReadPromptContent(t *testing.T) {
+	sys := "You are a helpful assistant."
+	spans := make([]Span, 0, 12)
+	for i := 0; i < 12; i++ {
+		spans = append(spans, makeSpan("t1", "s"+intToString(int64(i)), "", "call", "llm", map[string]any{
+			"neatlogs.span.kind":   "llm",
+			"neatlogs.llm.system": sys,
+		}))
+	}
+	path := writeTemp(t, spans...)
+	report := Diagnose(path, Options{ReadPromptContent: true})
+	f := findFinding(t, report, "repeated-system-prompt")
+	if f.Severity != "info" {
+		t.Errorf("repeated-system-prompt: expected info, got %q", f.Severity)
+	}
+	if !strings.Contains(f.Evidence, "12 times") {
+		t.Errorf("repeated-system-prompt: evidence should mention 12 times, got: %s", f.Evidence)
+	}
+}
+
+func TestUnusedToolDefinition_Fires(t *testing.T) {
+	spans := []Span{
+		makeSpan("t1", "l", "", "with-tools", "llm", map[string]any{
+			"neatlogs.span.kind":     "llm",
+			"gen_ai.operation.name": "chat",
+			"gen_ai.tool.definitions": []any{
+				map[string]any{"name": "get_weather"},
+				map[string]any{"name": "get_news"},
+			},
+			"gen_ai.output.messages": []any{
+				map[string]any{"finish_reason": "stop", "tool_calls": []any{}},
+			},
+		}),
+	}
+	report := runDiagnose(t, spans...)
+	f := findFinding(t, report, "unused-tool-definition")
+	if !strings.Contains(f.Evidence, "get_weather") {
+		t.Errorf("unused-tool-definition: evidence should mention get_weather, got: %s", f.Evidence)
+	}
+}
+
+func TestUnusedToolDefinition_DoesNotFireWhenAllCalled(t *testing.T) {
+	spans := []Span{
+		makeSpan("t1", "l", "", "all-used", "llm", map[string]any{
+			"neatlogs.span.kind":     "llm",
+			"gen_ai.operation.name": "chat",
+			"gen_ai.tool.definitions": []any{
+				map[string]any{"name": "get_weather"},
+			},
+			"gen_ai.output.messages": []any{
+				map[string]any{"tool_calls": []any{
+					map[string]any{"function": map[string]any{"name": "get_weather"}},
+				}},
+			},
+		}),
+	}
+	report := runDiagnose(t, spans...)
+	expectNoCode(t, report, "unused-tool-definition")
+}
+
+// ---------------------------------------------------------------------------
+// PR #21: RenderFixSnippet
+// ---------------------------------------------------------------------------
+
+func TestRenderFixSnippet_AllCodes(t *testing.T) {
+	for _, code := range FixSnippetCodes() {
+		snippet := RenderFixSnippet(code)
+		if snippet == "" {
+			t.Errorf("RenderFixSnippet(%q) returned empty string", code)
+			continue
+		}
+		// §12.8.3: plain text with literal newlines, not JSON-escaped.
+		if !strings.Contains(snippet, "\n") {
+			t.Errorf("RenderFixSnippet(%q): missing newline", code)
+		}
+		if strings.Contains(snippet, `\n`) {
+			t.Errorf("RenderFixSnippet(%q): contains JSON-escaped newline", code)
+		}
+		if !strings.Contains(snippet, "# Finding: "+code) {
+			t.Errorf("RenderFixSnippet(%q): missing header", code)
+		}
+		if !strings.Contains(snippet, "# BEFORE:") {
+			t.Errorf("RenderFixSnippet(%q): missing BEFORE section", code)
+		}
+		if !strings.Contains(snippet, "# AFTER:") {
+			t.Errorf("RenderFixSnippet(%q): missing AFTER section", code)
+		}
+	}
+}
+
+func TestRenderFixSnippet_UnknownReturnsEmpty(t *testing.T) {
+	if got := RenderFixSnippet("not-a-real-code"); got != "" {
+		t.Errorf("RenderFixSnippet on unknown code should return empty string, got: %q", got)
+	}
+	if got := RenderFixSnippet("init-after-client-typo"); got != "" {
+		t.Errorf("RenderFixSnippet on typo'd code should return empty string, got: %q", got)
+	}
+}

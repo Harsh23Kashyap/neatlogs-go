@@ -163,7 +163,7 @@ func Diagnose(path string, opts Options) DoctorReport {
 	for runID, runSpans := range runs {
 		traces := GroupByTrace(runSpans)
 		for traceID, traceSpans := range traces {
-			findings = append(findings, diagnoseTrace(traceID, traceSpans, runID)...)
+			findings = append(findings, diagnoseTrace(traceID, traceSpans, runID, opts.ReadPromptContent)...)
 		}
 		scopeFindings, scopeSeen := foreignInstrumentationFindings(runSpans, runID)
 		anyScopeSeen = anyScopeSeen || scopeSeen
@@ -226,10 +226,13 @@ func Diagnose(path string, opts Options) DoctorReport {
 
 // diagnoseTrace runs the per-trace checks in the order specified in the
 // handoff §6.1. Empty visible → no findings. Then build child_map, then
-// the 3 new dimensions (always run), then rootless-http-only (early
-// return), then missing-root-kind, then hierarchy pathologies, then
-// agent-without-llm, then missing-io.
-func diagnoseTrace(traceID string, spans []Span, runID string) []DoctorFinding {
+// the 5 pre-launch reliability dimensions (always run), then
+// rootless-http-only (early return), then missing-root-kind, then
+// hierarchy pathologies, then agent-without-llm, then missing-io.
+//
+// PR #21 added the OTel GenAI (3d) and token-waste (3e) dimensions; they
+// run alongside the existing 3 and also before the early return.
+func diagnoseTrace(traceID string, spans []Span, runID string, readPromptContent bool) []DoctorFinding {
 	var findings []DoctorFinding
 
 	// Apply visibility filter.
@@ -250,10 +253,14 @@ func diagnoseTrace(traceID string, spans []Span, runID string) []DoctorFinding {
 	spanChildMap := buildSpanChildMap(visible)
 	spanIDs, duplicates := buildSpanIDSets(visible)
 
-	// 1-3. New diagnostic dimensions (always run, even on unusual trace shapes).
+	// 1-5. Pre-launch reliability dimensions (always run, even on
+	// unusual trace shapes). PR #21 added steps 3d (OTel GenAI) and
+	// 3e (token-waste).
 	findings = append(findings, initOrderFindings(visible, traceID, runID)...)
 	findings = append(findings, attributeCompletenessFindings(visible, traceID, runID)...)
 	findings = append(findings, dataIntegrityFindings(visible, traceID, runID)...)
+	findings = append(findings, otelGenaiFindings(visible, traceID, runID)...)
+	findings = append(findings, tokenWasteFindings(visible, traceID, runID, readPromptContent)...)
 
 	// 4. rootless-http-only check → early return.
 	if isRootlessHTTPOnly(visible) {

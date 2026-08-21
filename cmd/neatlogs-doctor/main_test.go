@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -115,6 +116,103 @@ func TestRunMain_BadFlag(t *testing.T) {
 	code := runMain([]string{"--unknown-flag"}, &stdout, &stderr)
 	if code != 2 {
 		t.Errorf("expected exit 2 for bad flag, got %d", code)
+	}
+}
+
+// --- PR #21: --emit-fix and --read-prompt-content -------------------------
+
+func TestRunMain_EmitFix_KnownCode(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runMain([]string{"--emit-fix", "init-after-client"}, &stdout, &stderr)
+	if code != 0 {
+		t.Errorf("expected exit 0 for known --emit-fix code, got %d", code)
+	}
+	if !strings.Contains(stdout.String(), "# Finding: init-after-client") {
+		t.Errorf("expected snippet on stdout, got: %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "neatlogs.init()") {
+		t.Errorf("snippet should mention neatlogs.init(), got: %s", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("expected no stderr for known code, got: %s", stderr.String())
+	}
+}
+
+func TestRunMain_EmitFix_UnknownCode(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runMain([]string{"--emit-fix", "unknown-code"}, &stdout, &stderr)
+	if code != 2 {
+		t.Errorf("expected exit 2 for unknown --emit-fix code, got %d", code)
+	}
+	if !strings.Contains(stderr.String(), "Unknown finding code") {
+		t.Errorf("expected 'Unknown finding code' on stderr, got: %s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "init-after-client") {
+		t.Errorf("stderr should list known codes (init-after-client), got: %s", stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("expected empty stdout for unknown code, got: %s", stdout.String())
+	}
+}
+
+func TestRunMain_EmitFix_NoPathRequired(t *testing.T) {
+	// --emit-fix bypasses the path requirement; should not print "usage:".
+	var stdout, stderr bytes.Buffer
+	code := runMain([]string{"--emit-fix", "missing-span-kind"}, &stdout, &stderr)
+	if code != 0 {
+		t.Errorf("expected exit 0, got %d; stderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "# Finding: missing-span-kind") {
+		t.Errorf("expected snippet on stdout, got: %s", stdout.String())
+	}
+}
+
+func TestRunMain_EmitFix_EqualsForm(t *testing.T) {
+	// --emit-fix=CODE form should also work.
+	var stdout, _ bytes.Buffer
+	var stderr bytes.Buffer
+	code := runMain([]string{"--emit-fix=zero-duration-span"}, &stdout, &stderr)
+	if code != 0 {
+		t.Errorf("expected exit 0, got %d", code)
+	}
+	if !strings.Contains(stdout.String(), "zero-duration-span") {
+		t.Errorf("expected snippet for zero-duration-span, got: %s", stdout.String())
+	}
+}
+
+func TestRunMain_ReadPromptContentFlag(t *testing.T) {
+	// Build a trace with 12 LLM spans sharing the same system prompt.
+	// Without --read-prompt-content → no finding. With → finding.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "spans.jsonl")
+	var lines []string
+	lines = append(lines, `{"trace_id":"t1","span_id":"r","parent_span_id":null,"name":"root","kind":"workflow","attributes":{"neatlogs.span.kind":"workflow"}}`)
+	sys := "You are a helpful assistant."
+	for i := 0; i < 12; i++ {
+		lines = append(lines, fmt.Sprintf(`{"trace_id":"t1","span_id":"s%d","parent_span_id":"r","name":"call-%d","kind":"llm","attributes":{"neatlogs.span.kind":"llm","neatlogs.llm.system":%q}}`, i, i, sys))
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Without flag → no repeated-system-prompt.
+	var stdout1, _ bytes.Buffer
+	code := runMain([]string{path, "--json"}, &stdout1, &bytes.Buffer{})
+	if code != 0 {
+		t.Errorf("expected exit 0, got %d", code)
+	}
+	if strings.Contains(stdout1.String(), "repeated-system-prompt") {
+		t.Errorf("without --read-prompt-content, no repeated-system-prompt expected, got: %s", stdout1.String())
+	}
+
+	// With flag → repeated-system-prompt fires.
+	var stdout2, _ bytes.Buffer
+	code = runMain([]string{path, "--read-prompt-content", "--json"}, &stdout2, &bytes.Buffer{})
+	if code != 0 {
+		t.Errorf("expected exit 0, got %d", code)
+	}
+	if !strings.Contains(stdout2.String(), "repeated-system-prompt") {
+		t.Errorf("with --read-prompt-content, expected repeated-system-prompt in output, got: %s", stdout2.String())
 	}
 }
 
