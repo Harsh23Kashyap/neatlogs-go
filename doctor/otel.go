@@ -1,14 +1,8 @@
 // PR #21: OTel GenAI semconv validation + token-waste patterns.
 //
-// Both walks share the same LLM-kind predicate (`isLLMKind`), which
-// returns true if either the neatlogs `kind=llm` is set OR an OTel
-// `gen_ai.operation.name` in OTelGenaiLLMOperations is present.
-//
-// §12.8.2 (PR #21 review): the OTel GenAI walker MUST check isLLMKind()
-// BEFORE looking at `neatlogs.span.kind` and `gen_ai.operation.name`
-// separately. A span with `neatlogs.span.kind == "tool"` and
-// `gen_ai.operation.name == "chat"` is a tool span, not an LLM span,
-// and must be skipped regardless of the OTel op-name.
+// §12.8.2 (PR #21 review): isLLMKind() must run before checking
+// gen_ai.operation.name. A tool span with chat op-name is still a
+// tool span, not an LLM span.
 
 package doctor
 
@@ -18,13 +12,11 @@ import (
 	"strings"
 )
 
-// isLLMKind reports whether a span represents an LLM operation, either
-// by neatlogs kind or by OTel `gen_ai.operation.name`.
+// isLLMKind reports whether a span is an LLM operation, by neatlogs
+// kind or by an OTel chat-style gen_ai.operation.name.
 //
-// Order matters: a tool span with `gen_ai.operation.name == "chat"` is
-// still a tool span, not an LLM span. So the neatlogs-kind check (when
-// present and equal to "llm") takes precedence; the OTel fallback only
-// applies when the neatlogs kind is absent or not "llm".
+// Order matters: neatlogs.kind=llm takes precedence; a tool span
+// with chat op-name is still a tool span.
 func isLLMKind(s Span) bool {
 	attrs := Attributes(s)
 	if attrs["neatlogs.span.kind"] == "llm" {
@@ -38,19 +30,13 @@ func isLLMKind(s Span) bool {
 	return false
 }
 
-// ---------------------------------------------------------------------------
-// OTel GenAI findings (§4.16.A)
-// ---------------------------------------------------------------------------
-
 // otelGenaiFindings validates that LLM-kind spans also carry OTel
-// GenAI semconv attrs. Two findings:
-//   - `otel-genai-missing` (warning): LLM span has no `gen_ai.operation.name`.
-//   - `otel-genai-inconsistent` (info): both neatlogs and OTel attrs
-//     present but disagree on the operation kind.
+// GenAI semconv attrs. Emits otel-genai-missing (warning) when an
+// LLM span lacks gen_ai.operation.name, and otel-genai-inconsistent
+// (info) when the neatlogs kind and the OTel op-name disagree.
 //
-// Internal spans are excluded. Foreign-scope spans are also implicitly
-// excluded because isLLMKind requires neatlogs `kind=llm` OR an OTel
-// chat-style op-name; foreign wrappers usually have neither.
+// Internal spans are skipped. Foreign-scope spans are skipped
+// implicitly: isLLMKind needs neatlogs kind=llm or an OTel chat op.
 func otelGenaiFindings(visible []Span, traceID, runID string) []DoctorFinding {
 	var findings []DoctorFinding
 	var missingCount int
@@ -102,10 +88,6 @@ func otelGenaiFindings(visible []Span, traceID, runID string) []DoctorFinding {
 	}
 	return findings
 }
-
-// ---------------------------------------------------------------------------
-// Token-waste findings (§4.16.B)
-// ---------------------------------------------------------------------------
 
 // llmPromptSize returns the total char count of an LLM span's prompt.
 //

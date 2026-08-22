@@ -1,13 +1,11 @@
 // PR #21: manual-fix snippets for `--emit-fix` (handoff §4.16.C).
 //
-// Each entry is a (description, before, after) triple the user can
-// copy-paste. We intentionally do NOT do AST-based auto-fix: rewrites
-// are fragile across project structures (Jupyter, K8s init, generated
-// code). The user copy-pastes the snippet — correct-by-construction.
-//
 // §12.8.3: snippet source is plain text with newlines; the renderer
 // joins with "\n" and the CLI writes the result to stdout verbatim.
-// Do NOT JSON-encode the snippet.
+// Do NOT JSON-encode the snippet. We intentionally skip AST-based
+// auto-fix: rewrites are fragile across project structures (Jupyter,
+// K8s init, generated code). The user copy-pastes the snippet — correct
+// by construction.
 
 package doctor
 
@@ -24,8 +22,8 @@ type FixSnippet struct {
 	After       string
 }
 
-// fixSnippets holds the 4 registered snippets. Codes are stable
-// identifiers matching the DoctorFinding.Code of the issue they fix.
+// fixSnippets holds the 4 registered snippets. Codes match the
+// DoctorFinding.Code of the issue they fix.
 var fixSnippets = map[string]FixSnippet{
 	"init-after-client": {
 		Description: "Move neatlogs.init() to the top of the entry point (before any LLM client is constructed).",
